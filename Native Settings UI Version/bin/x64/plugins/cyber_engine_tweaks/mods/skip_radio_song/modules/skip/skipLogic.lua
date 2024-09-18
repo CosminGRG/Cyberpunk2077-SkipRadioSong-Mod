@@ -1,98 +1,125 @@
-
 local Cron = require("modules/externals/Cron")
 local utils = require("modules/utils/utils")
 
 local skipLogic = {
     audioSystem = nil,
     delay = false,
+
+    currentPlaylist = {},
+    currentSongIndex = 1,
+    station = nil,
+
     radioExt = nil,
-    radioExtActiveStationData = nil
+    radioExtActiveStationData = nil,
+    radioExtStation = nil,
+    radioExtCurrentPlaylist = {},
+    radioExtCurrentSongIndex = 1
 }
 
-local function playPseudoRandomSong(currentStation, audioCueFeedback)
+function skipLogic.getNextSong(currentStation)
+    if skipLogic.station ~= currentStation or #skipLogic.currentPlaylist == 0 or skipLogic.currentSongIndex > #skipLogic.currentPlaylist then
+        skipLogic.currentPlaylist = utils.getStationSongs(currentStation)
+        skipLogic.currentSongIndex = 1
+        skipLogic.station = currentStation
 
-    local songs = utils.getStationSongs(currentStation)
+        utils.shuffleTable(skipLogic.currentPlaylist)
+    end
 
-    local count = utils.tableLength(songs)
+    local nextSong = skipLogic.currentPlaylist[skipLogic.currentSongIndex]
 
-    local nextSongIndex = math.random(1, count)
-    local nextSongInfo = utils.songCodeToInfo(songs[nextSongIndex])
+    skipLogic.currentSongIndex = skipLogic.currentSongIndex + 1
+    return nextSong
+end
 
-    if (audioCueFeedback) then
-        skipLogic.audioSystem:Play("dev_pocket_radio_on")
+function skipLogic.playPseudoRandomSong(currentStation, audioCueFeedback)
+    local nextSong = skipLogic.getNextSong(currentStation)
+    local nextSongInfo = utils.songCodeToInfo(nextSong)
+
+    if audioCueFeedback then
+        skipLogic.audioSystem:Play("dev_pocket_radio_off")
     end
 
     skipLogic.audioSystem:RequestSongOnRadioStation(currentStation, nextSongInfo[1])
 end
 
-local function handleRadioExtSkip(audioCueFeedback) 
+function skipLogic.handleRadioExtSkip(audioCueFeedback)
     skipLogic.radioExtActiveStationData = skipLogic.radioExt.radioManager.managerV:getActiveStationData()
-    if skipLogic.radioExtActiveStationData ~= nil then
 
-        local radioExtRadio = skipLogic.radioExt.radioManager.managerV:getRadioByName(skipLogic.radioExtActiveStationData.station)
+    if not skipLogic.radioExtActiveStationData then return end
 
-        if (audioCueFeedback) then
-            skipLogic.audioSystem:Play("dev_pocket_radio_on")
-        end
+    local stationName = skipLogic.radioExtActiveStationData.station
+    local radioExtRadio = skipLogic.radioExt.radioManager.managerV:getRadioByName(stationName)
 
-        radioExtRadio:currentSongDone()
+    if not radioExtRadio then return end
 
-        radioExtRadio.currentSong = radioExtRadio.songs[math.random(1, #radioExtRadio.songs)]
-        radioExtRadio.tick = 0
-
-        radioExtRadio:startNewSong()
+    if skipLogic.radioExtStation ~= stationName or skipLogic.radioExtCurrentSongIndex > #skipLogic.radioExtCurrentPlaylist then
+        skipLogic.radioExtStation = stationName
+        skipLogic.radioExtCurrentPlaylist = radioExtRadio.songs
+        skipLogic.radioExtCurrentSongIndex = 1
+        utils.shuffleTable(skipLogic.radioExtCurrentPlaylist)
     end
+
+    if audioCueFeedback then
+        skipLogic.audioSystem:Play("dev_pocket_radio_off")
+    end
+
+    radioExtRadio:currentSongDone()
+
+    local nextSong = skipLogic.radioExtCurrentPlaylist[skipLogic.radioExtCurrentSongIndex]
+    skipLogic.radioExtCurrentSongIndex = skipLogic.radioExtCurrentSongIndex + 1;
+
+    radioExtRadio.currentSong = nextSong
+    radioExtRadio.tick = 0
+
+    radioExtRadio:startNewSong()
 end
 
 function skipLogic.skipSong(audioCueFeedback, radioOffAlert)
-    if (skipLogic.delay == false) then
-        skipLogic.delay = true
+    if skipLogic.delay then return end
 
-        if (skipLogic.radioExt) then
-            handleRadioExtSkip(audioCueFeedback)
-        end
+    skipLogic.delay = true
 
-        if (skipLogic.radioExtActiveStationData == nil) then
-            if (Game.GetMountedVehicle(Game.GetPlayer()) ~= nil) then
+    if skipLogic.radioExt then
+        skipLogic.handleRadioExtSkip(audioCueFeedback)
+    end
 
-                local car = Game.GetMountedVehicle(Game.GetPlayer())
-    
-                if (car and car:IsRadioReceiverActive()) then
+    local player = Game.GetPlayer()
+    local vehicle = Game.GetMountedVehicle(player)
+    local isRadioActive = vehicle and vehicle:IsRadioReceiverActive()
+    local pocketRadio = player:GetPocketRadio()
+    local isPocketRadioActive = pocketRadio and pocketRadio:IsActive()
 
-                    local currentSong = tostring(car:GetRadioReceiverTrackName()):sub(20, 29)
-                    local currentStation = utils.getStation(currentSong)
-                
-                    if (currentStation ~= nil and currentSong ~= nil) then
-                        playPseudoRandomSong(currentStation, audioCueFeedback)
-                    end
-                else 
-                    if (radioOffAlert) then
-                        Game.GetPlayer():SetWarningMessage("[Skip Radio Song] Car Radio is Off")
-                    end
+    if skipLogic.radioExtActiveStationData == nil then
+        if vehicle and isRadioActive then
+            local currentSong = tostring(vehicle:GetRadioReceiverTrackName()):sub(20, 29)
+            local currentStation = utils.getStation(currentSong)
+
+            if currentSong and currentStation then
+                skipLogic.playPseudoRandomSong(currentStation, audioCueFeedback)
+            end
+        elseif isPocketRadioActive then
+            local currentSong = tostring(pocketRadio:GetTrackName()):sub(20, 29)
+            local currentStation = utils.getStation(currentSong)
+
+            if currentSong and currentStation then
+                skipLogic.playPseudoRandomSong(currentStation, audioCueFeedback)
+            end
+        else
+            if radioOffAlert then
+                local message
+                if vehicle and not isRadioActive then
+                    message = "Car Radio is Off"
+                elseif not isPocketRadioActive then
+                    message = "Pocket Radio is Off"
                 end
-            else
-                local PocketRadio = Game.GetPlayer():GetPocketRadio()
-
-                if (PocketRadio and PocketRadio:IsActive()) then
-
-                    local currentSong = tostring(PocketRadio:GetTrackName()):sub(20, 29)
-                    local currentStation = utils.getStation(currentSong)
-                    
-                    if (currentStation ~= nil and currentSong ~= nil) then
-                        playPseudoRandomSong(currentStation)
-                    end
-                else
-                    if (radioOffAlert) then
-                        Game.GetPlayer():SetWarningMessage("[Skip Radio Song] Pocket Radio is Off")
-                    end
-                end
+                player:SetWarningMessage(message)
             end
         end
-
-        Cron.After(1, function()
-            skipLogic.delay = false
-        end)
     end
+
+    Cron.After(1, function()
+        skipLogic.delay = false
+    end)
 end
 
 function skipLogic.onInit()
@@ -106,5 +133,3 @@ function skipLogic.onUpdate(deltaTime)
 end
 
 return skipLogic
-
-

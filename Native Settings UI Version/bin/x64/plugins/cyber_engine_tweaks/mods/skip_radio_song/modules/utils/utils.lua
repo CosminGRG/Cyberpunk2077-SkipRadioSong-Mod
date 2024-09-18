@@ -3,9 +3,8 @@ utils = {
 }
 
 function utils.getStation(song)
-
     for key, songList in pairs(radioData.radioStationSongs) do
-        if(songList:find(song)) then
+        if (songList:find(song)) then
             return key
         end
     end
@@ -13,10 +12,9 @@ function utils.getStation(song)
 end
 
 function utils.getStationSongs(stationID)
-
     local songList = radioData.radioStationSongs[stationID]
 
-    if(songList) then
+    if (songList) then
         local songCodes = {}
         for val in string.gmatch(songList, "(%w+),") do
             table.insert(songCodes, val)
@@ -27,7 +25,6 @@ function utils.getStationSongs(stationID)
 end
 
 function utils.songCodeToInfo(code)
-
     local songInfoString = radioData.songHashToInfo[code]
     local songInfo = {}
     for info in string.gmatch(songInfoString, "[^%|]+") do
@@ -40,6 +37,14 @@ function utils.tableLength(T)
     local count = 0
     for _ in pairs(T) do count = count + 1 end
     return count
+end
+
+function utils.shuffleTable(t)
+    local n = #t
+    for i = n, 2, -1 do
+        local j = math.random(1, i)
+        t[i], t[j] = t[j], t[i]
+    end
 end
 
 function utils.Deepcopy(orig)
@@ -58,4 +63,3 @@ function utils.Deepcopy(orig)
 end
 
 return utils
-
